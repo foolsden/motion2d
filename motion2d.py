@@ -1,6 +1,237 @@
-from pygame.math import Vector2
+
 import math
 from typing import Optional, Union, Sequence
+
+EPSILON = 1e-6
+
+# --- Minimal Vector2 replacement for pygame.math.Vector2 ---
+# Designed for Python 3.8+, __slots__, no extra allocations
+class Vector2:
+    __slots__ = ('x', 'y')
+
+    def __init__(self, *args):
+        # Vector2(), Vector2(v), Vector2((x,y)), Vector2(x,y)
+        if len(args) == 0:
+            self.x = 0.0
+            self.y = 0.0
+        elif len(args) == 1:
+            a = args[0]
+            # copy from Vector2-like (has x,y)
+            if isinstance(a, Vector2):
+                self.x = float(a.x)
+                self.y = float(a.y)
+            elif isinstance(a, (list, tuple)):
+                # allow (x,y) sequence
+                if len(a) != 2:
+                    raise ValueError("Vector2 sequence must have 2 elements")
+                self.x = float(a[0])
+                self.y = float(a[1])
+            else:
+                # object with x,y attributes (duck typing for other vec types)
+                try:
+                    self.x = float(a[0])  # type: ignore
+                    self.y = float(a[1])  # type: ignore
+                except Exception:
+                    try:
+                        self.x = float(a.x)  # type: ignore
+                        self.y = float(a.y)  # type: ignore
+                    except Exception:
+                        raise TypeError("Vector2() arg must be Vector2 or sequence of 2 floats")
+        elif len(args) == 2:
+            self.x = float(args[0])
+            self.y = float(args[1])
+        else:
+            raise TypeError("Vector2() takes 0, 1 or 2 arguments")
+
+    # ---- core metrics ----
+    def length_squared(self):
+        # type: () -> float
+        return self.x * self.x + self.y * self.y
+
+    def length(self):
+        # type: () -> float
+        return math.hypot(self.x, self.y)
+
+    def dot(self, other):
+        # type: (Union[Vector2, Sequence[float]]) -> float
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            ox = float(other.x)
+            oy = float(other.y)  # type: ignore
+        return self.x * ox + self.y * oy
+
+    def as_polar(self):
+        # type: () -> Tuple[float, float]
+        # returns (r, angle_deg) like pygame: angle from +X, CCW, degrees
+        r = math.hypot(self.x, self.y)
+        theta = math.degrees(math.atan2(self.y, self.x))
+        return (r, theta)
+
+    def rotate(self, angle_deg):
+        # type: (float) -> Vector2
+        # CCW rotation, returns new vector (pygame compatible)
+        if angle_deg == 0:
+            return Vector2(self.x, self.y)
+        rad = math.radians(angle_deg)
+        c = math.cos(rad)
+        s = math.sin(rad)
+        return Vector2(self.x * c - self.y * s, self.x * s + self.y * c)
+
+    def normalize(self):
+        # type: () -> Vector2
+        lsq = self.x * self.x + self.y * self.y
+        if lsq <= 1e-12:  # guard - pygame would return (0,0) for very small?
+            return Vector2(0.0, 0.0)
+        inv = 1.0 / math.sqrt(lsq)
+        return Vector2(self.x * inv, self.y * inv)
+
+    def normalize_ip(self):
+        # type: () -> None
+        lsq = self.x * self.x + self.y * self.y
+        if lsq <= 1e-12:
+            self.x = 0.0
+            self.y = 0.0
+            return None
+        inv = 1.0 / math.sqrt(lsq)
+        self.x *= inv
+        self.y *= inv
+        return None
+
+    def scale_to_length(self, new_len):
+        # type: (float) -> None
+        lsq = self.x * self.x + self.y * self.y
+        if lsq <= 1e-12:
+            return None
+        cur = math.sqrt(lsq)
+        if cur == 0:
+            return None
+        f = float(new_len) / cur
+        self.x *= f
+        self.y *= f
+        return None
+
+    # ---- operators ----
+    def __add__(self, other):
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            ox = float(other.x)
+            oy = float(other.y)  # type: ignore
+        return Vector2(self.x + ox, self.y + oy)
+
+    def __sub__(self, other):
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            ox = float(other.x)
+            oy = float(other.y)  # type: ignore
+        return Vector2(self.x - ox, self.y - oy)
+
+    def __mul__(self, scalar):
+        # type: (float) -> Vector2
+        # only scalar mul is used in Motion2D, but allow vector check to error clearly
+        if isinstance(scalar, (int, float)):
+            return Vector2(self.x * scalar, self.y * scalar)
+        # if user does vector * vector, fall back to trying sequence? not needed
+        raise TypeError("Vector2 can only be multiplied by scalar")
+
+    def __rmul__(self, scalar):
+        if isinstance(scalar, (int, float)):
+            return Vector2(self.x * scalar, self.y * scalar)
+        raise TypeError("Vector2 can only be multiplied by scalar")
+
+    def __truediv__(self, scalar):
+        # type: (float) -> Vector2
+        return Vector2(self.x / scalar, self.y / scalar)
+
+    def __neg__(self):
+        return Vector2(-self.x, -self.y)
+
+    def __pos__(self):
+        return Vector2(self.x, self.y)
+
+    def __iadd__(self, other):
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            ox = float(other.x)
+            oy = float(other.y)  # type: ignore
+        self.x += ox
+        self.y += oy
+        return self
+
+    def __isub__(self, other):
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            ox = float(other.x)
+            oy = float(other.y)  # type: ignore
+        self.x -= ox
+        self.y -= oy
+        return self
+
+    def __imul__(self, scalar):
+        # type: (float) -> Vector2
+        # used as lateral *= exp(-grip*dt)
+        s = float(scalar)
+        self.x *= s
+        self.y *= s
+        return self
+
+    def __itruediv__(self, scalar):
+        s = float(scalar)
+        self.x /= s
+        self.y /= s
+        return self
+
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
+    def __getitem__(self, idx):
+        if idx == 0:
+            return self.x
+        if idx == 1:
+            return self.y
+        raise IndexError("Vector2 index out of range")
+
+    def __setitem__(self, idx, value):
+        if idx == 0:
+            self.x = float(value)
+        elif idx == 1:
+            self.y = float(value)
+        else:
+            raise IndexError("Vector2 index out of range")
+
+    def __eq__(self, other):
+        try:
+            ox = float(other[0])
+            oy = float(other[1])
+        except Exception:
+            try:
+                ox = float(other.x)
+                oy = float(other.y)  # type: ignore
+            except Exception:
+                return False
+        return self.x == ox and self.y == oy
+
+    def __repr__(self):
+        return "Vector2({:.6g}, {:.6g})".format(self.x, self.y)
+
+    def __bool__(self):
+        return self.x != 0.0 or self.y != 0.0
+
+    def copy(self):
+        return Vector2(self.x, self.y)
+
+VectorLike = Union[Vector2, Sequence[float]]
+
 
 EPSILON = 1e-6
 
@@ -23,14 +254,14 @@ class Heading:
         """Return direction as Vector2."""
         raise NotImplementedError()
 
-    def aim(self, direction: VectorLike, dt: float = 1/60, snap: bool = False) -> bool:
+    def aim(self, direction: VectorLike, dt: float = 1 / 60, snap: bool = False) -> bool:
         """Aim toward a direction."""
         raise NotImplementedError()
 
-    def turn_left(self, dt: float = 1/60) -> None:
+    def turn_left(self, dt: float = 1 / 60) -> None:
         raise NotImplementedError
 
-    def turn_right(self, dt: float = 1/60) -> None:
+    def turn_right(self, dt: float = 1 / 60) -> None:
         raise NotImplementedError
 
 
@@ -82,7 +313,7 @@ class Rotator(Heading):
             self.angle %= 360.0
             return False
 
-    def aim(self, direction: VectorLike = (1, 0), dt: float = 1/60, snap: bool = False) -> bool:
+    def aim(self, direction: VectorLike = (1, 0), dt: float = 1 / 60, snap: bool = False) -> bool:
         """
         Unified aiming method. dt is only used when snap is False.
         Return True if it's aligned, False if it's still turning
@@ -113,10 +344,10 @@ class Rotator(Heading):
     def flip(self) -> None:
         self.angle = (self.angle + 180.0) % 360.0
 
-    def turn_left(self, dt: float = 1/60) -> None:
+    def turn_left(self, dt: float = 1 / 60) -> None:
         self.rotate(-1, dt)
 
-    def turn_right(self, dt: float = 1/60) -> None:
+    def turn_right(self, dt: float = 1 / 60) -> None:
         self.rotate(1, dt)
 
 
@@ -156,7 +387,7 @@ class Facing(Heading):
     def vector(self) -> Vector2:
         return self._vector
 
-    def aim(self, direction: VectorLike = (1, 0), dt: float = 1/60, snap: bool = False) -> bool:
+    def aim(self, direction: VectorLike = (1, 0), dt: float = 1 / 60, snap: bool = False) -> bool:
         """Facing doesn't need the dt and snap and will be ignored"""
         vec = Vector2(direction)
         if vec.length_squared() <= EPSILON:
@@ -306,7 +537,7 @@ class Facing(Heading):
         else:
             return self._name_direction == 'down_left'
 
-    def turn_left(self, dt: float = 1/60) -> None:
+    def turn_left(self, dt: float = 1 / 60) -> None:
         '''Don't forget to use keydown instead of keypress because this is instant!'''
         if self.directions == 2:
             self.flip()
@@ -315,7 +546,7 @@ class Facing(Heading):
         elif self.directions == 8:
             self._vector = self._vector.rotate(-45)
 
-    def turn_right(self, dt: float = 1/60) -> None:
+    def turn_right(self, dt: float = 1 / 60) -> None:
         '''Don't forget to use keydown instead of keypress because this is instant!'''
         if self.directions == 2:
             self.flip()
@@ -344,14 +575,14 @@ class NoHeading(Heading):
         """Return default direction."""
         return self._default
 
-    def aim(self, direction: VectorLike = (1, 0), dt: float = 1/60, snap: bool = False) -> bool:
+    def aim(self, direction: VectorLike = (1, 0), dt: float = 1 / 60, snap: bool = False) -> bool:
         """ For polymorphism purposes, intentionally no operation here"""
         return False
 
-    def turn_left(self, dt: float = 1/60) -> None:
+    def turn_left(self, dt: float = 1 / 60) -> None:
         pass
 
-    def turn_right(self, dt: float = 1/60) -> None:
+    def turn_right(self, dt: float = 1 / 60) -> None:
         pass
 
 
@@ -370,7 +601,7 @@ class KinematicBody:
         max_x_speed: Optional[float] = None,
         max_y_speed: Optional[float] = None,
         drag: float = 0.0,
-        sleep_threshold: float = 0.1, # Velocity below this is rounded to zero
+        sleep_threshold: float = 0.1,  # Velocity below this is rounded to zero
     ):
         if drag < 0:
             raise ValueError("drag must be non-negative")
@@ -822,7 +1053,6 @@ class BaseMotion:
         """
         raise NotImplementedError("Subclasses must implement step_velocity()")
 
-
     def authority(self, dt: float, velocity: Optional[VectorLike] = None) -> Vector2:
         """
         Alternate velocity pipeline. Skips ALL normal physics processing:
@@ -849,7 +1079,6 @@ class BaseMotion:
             self.body.vel = Vector2(velocity)
         dt = min(float(dt), MAX_DT)
         return self.body.vel * dt
-        
 
     def update(self, dt: float) -> None:
         raise NotImplementedError("Subclasses must implement update()")
@@ -868,6 +1097,7 @@ class PlatformerMotion(BaseMotion):
     - Your game must handle collision and grounded state.
       This controller applies gravity and horizontal movement only.
     """
+
     def __init__(
         self,
         pos: VectorLike = (0, 0),
@@ -935,13 +1165,12 @@ class PlatformerMotion(BaseMotion):
         self._normalize_intent()
 
         # Mark horizontal axis as active if we're moving
-        self.body.mark_active(
-            x = abs(self._move_intent.x) > EPSILON,
-            y = False)  # Gravity always applies
+        x = abs(self._move_intent.x) > EPSILON
+        self.body.mark_active(x=x, y=False)  # Gravity always applies
 
         # Horizontal movement
         target_x = self._move_intent.x * self.speed
-        rate = self.acceleration if abs(self._move_intent.x) > EPSILON else self.deceleration
+        rate = self.acceleration if x > EPSILON else self.deceleration
         self.body.vel.x = self._approach(self.body.vel.x, target_x, rate * dt)
 
         # Gravity
@@ -990,7 +1219,7 @@ class TopDownMotion(BaseMotion):
         if speed <= 0 or acceleration <= 0:
             raise ValueError("speed and acceleration must be positive")
 
-        if max_speed == None:
+        if max_speed is None:
             max_speed = speed
 
         if body is None:
@@ -1199,13 +1428,17 @@ __all__ = [
     'Vector2',
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Motion2D Contributors"
 
 
 # HISTORY
+# v1.1.0:
+# - Remove pygame.Vector2 depedency
+
 # v1.0.0:
 # - Fixes dt <=0 in authority()
+# - Fixes rotator aim() with supplied direction
 # - Fixes turn_toward return False instead of None
 # - Conclude the demos, upgrade into v1.0
 
