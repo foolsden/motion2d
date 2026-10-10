@@ -162,3 +162,8 @@ library's design.
 Some extensions — such as the `VehicleMotion` example in the demos —
 are intentionally less finished. That's fine. The goal is a solid
 foundation that grows when a real game gives it a reason to.
+
+---
+## Version:
+V 1.1.0:
+- Remove pygame dependecies
